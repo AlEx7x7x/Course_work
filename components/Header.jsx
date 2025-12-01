@@ -1,19 +1,28 @@
-// components/Header.jsx
+// components/Header.jsx (ФІНАЛЬНЕ ВИПРАВЛЕННЯ)
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { AppBar, Toolbar, Typography, Box, useTheme, IconButton } from '@mui/material';
-import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
-// 💡 Можна додати інструменти для пошуку чи перемикання теми пізніше
+
+// 🚨 Заглушка, щоб уникнути помилки імпорту на рівні Node.js
+const HeaderIcon = React.memo(() => {
+    // 🚨 Ми використовуємо require, щоб імпортувати іконку лише на клієнті,
+    // запобігаючи помилці ERR_UNSUPPORTED_DIR_IMPORT під час SSR.
+    if (typeof window !== 'undefined') {
+        const DirectionsBusIcon = require('@mui/icons-material/DirectionsBus').default;
+        return <DirectionsBusIcon />;
+    }
+    return '🚌'; // Заглушка для SSR
+});
 
 export default function Header() {
   const theme = useTheme();
 
   return (
     <AppBar 
-      position="fixed" // Фіксуємо хедер
+      position="fixed" 
       sx={{ 
-        zIndex: theme.zIndex.drawer + 1, // Над сайдбаром
-        backgroundColor: theme.palette.background.paper, // Використовуємо 'paper' для гарного темного фону
+        zIndex: theme.zIndex.drawer + 1, 
+        backgroundColor: theme.palette.background.paper, 
         borderBottom: `1px solid ${theme.palette.divider}`,
       }}
     >
@@ -24,7 +33,7 @@ export default function Header() {
             aria-label="menu"
             sx={{ mr: 2 }}
         >
-            <DirectionsBusIcon />
+            <HeaderIcon /> 
         </IconButton>
         
         <Typography 
@@ -38,9 +47,6 @@ export default function Header() {
         </Typography>
 
         <Box sx={{ flexGrow: 1 }} />
-        
-        {/* 💡 Тут можна додати інші елементи, такі як поле пошуку */}
-
       </Toolbar>
     </AppBar>
   );

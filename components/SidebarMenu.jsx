@@ -1,114 +1,130 @@
 // components/SidebarMenu.jsx
 
-import React from 'react';
-import { Box, Typography, List, ListItem, Divider, Paper, ListItemText, ListItemButton, useTheme } from '@mui/material';
-import Link from 'next/link';
-// 🚨 ФІКС: Імпортуємо useRoutes безпосередньо
-import { useRoutes } from '../utils/hooks'; 
-
-// ... (Ваші допоміжні функції, такі як categorizeRoutes)
-
-const categorizeRoutes = (routes) => {
-  const categories = {};
-  if (!Array.isArray(routes)) return {}; // Захист
-
-  routes.forEach(route => {
-    const type = route.route_type;
-    if (!categories[type]) {
-      categories[type] = [];
-    }
-    categories[type].push(route);
-  });
-  return categories;
-};
-
-// ... (Ваш компонент RouteCategory)
-
-const RouteCategory = ({ name, routes, selectedRouteId, onSelectRoute }) => {
-  const theme = useTheme();
-  // ... (Ваш код відображення категорії)
-  
-  // 💡 Для демонстрації: відображаємо лише назву маршруту
-  return (
-    <Box>
-      <Typography variant="subtitle2" sx={{ p: 1, color: 'primary.main', fontWeight: 'bold' }}>
-        {name} ({routes.length})
-      </Typography>
-      <List dense disablePadding>
-        {routes.map((route) => (
-          <ListItemButton
-            key={route.route_id}
-            selected={route.route_id === selectedRouteId}
-            onClick={() => onSelectRoute(route.route_id === selectedRouteId ? null : route.route_id)}
-            sx={{ 
-                pl: 2, 
-                py: 0.5,
-                '&.Mui-selected': {
-                    backgroundColor: theme.palette.primary.dark,
-                    '&:hover': {
-                         backgroundColor: theme.palette.primary.dark,
-                    }
-                }
-            }}
-          >
-            <ListItemText 
-                primary={route.route_short_name} 
-                secondary={route.route_long_name.split(' - ')[0]} 
-                primaryTypographyProps={{ fontWeight: 'bold', fontSize: 14 }}
-                secondaryTypographyProps={{ fontSize: 10, color: 'text.secondary' }}
-            />
-          </ListItemButton>
-        ))}
-      </List>
-      <Divider />
-    </Box>
-  );
-};
+import React, { useMemo } from 'react';
+import { 
+    Drawer, 
+    Toolbar, 
+    Divider, 
+    List, 
+    ListItem, 
+    ListItemButton, 
+    ListItemText, 
+    Typography,
+    Box,
+    ListItemIcon,
+    useTheme // Використовуємо тему для кольорів
+} from '@mui/material';
+import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
+import TramIcon from '@mui/icons-material/Tram';
+import ClearAllIcon from '@mui/icons-material/ClearAll'; // Іконка для скидання фільтра
 
 
-export default function SidebarMenu({ selectedRouteId, onSelectRoute }) {
-  // 🚨 ФІКС: Викликаємо useRoutes безпосередньо
-  const routes = useRoutes(); 
-  const categories = categorizeRoutes(routes);
-  
-  const getCategoryName = (type) => {
-    switch (type) {
-      case '0': return 'Трамваї';
-      case '3': return 'Автобуси/Маршрутки';
-      default: return 'Інше';
-    }
-  };
+const SidebarMenu = ({ drawerWidth, vehicles, onSelectRoute }) => {
+    const theme = useTheme();
 
-  return (
-    <Paper 
-      sx={{ 
-        width: 300, 
-        flexShrink: 0, 
-        height: '100%', 
-        borderRight: `1px solid ${theme.palette.divider}`,
-        position: 'fixed', // Фіксуємо сайдбар
-        top: 64, // Під хедером
-        left: 0,
-        overflowY: 'auto',
-        backgroundColor: theme.palette.background.paper
-      }}
-    >
-      <Box sx={{ p: 2 }}>
-        <Typography variant="h5" sx={{ mb: 1, fontWeight: 'bold' }}>
-          Маршрути 🚌
-        </Typography>
-        <Divider sx={{ mb: 2 }} />
+    // ⚠️ ГРУПУВАННЯ ТА СОРТУВАННЯ МАРШРУТІВ
+    const uniqueRoutes = useMemo(() => {
+        const map = {};
+        vehicles.forEach(vehicle => {
+            if (!map[vehicle.routeId]) {
+                map[vehicle.routeId] = {
+                    id: vehicle.routeId,
+                    description: vehicle.routeDescription || `Маршрут ${vehicle.routeId}`,
+                    count: 0,
+                    type: vehicle.type,
+                };
+            }
+            map[vehicle.routeId].count++;
+        });
         
-        {Object.keys(categories).sort().map(type => (
-          <RouteCategory 
-            key={type}
-            name={getCategoryName(type)}
-            routes={categories[type]}
-            selectedRouteId={selectedRouteId}
-            onSelectRoute={onSelectRoute}
-          />
-        ))}
-      </Box>
-    </Paper>
-  );
-}
+        // Сортування: Трамваї (Т) перед Автобусами (А), потім за номером
+        return Object.values(map).sort((a, b) => {
+            const isTramA = a.id.startsWith('Т');
+            const isTramB = b.id.startsWith('Т');
+
+            if (isTramA && !isTramB) return -1;
+            if (!isTramA && isTramB) return 1;
+            
+            // Сортування за номером маршруту
+            return a.id.localeCompare(b.id, 'uk', { numeric: true });
+        });
+    }, [vehicles]);
+
+    const handleRouteClick = (routeId) => () => {
+        onSelectRoute(routeId);
+    };
+
+    const renderIcon = (type, isReset = false) => {
+        if (isReset) {
+            return <ClearAllIcon color="action" />;
+        }
+        // Використовуємо кольори з теми MUI
+        if (type === 'TRAM') {
+            return <TramIcon sx={{ color: theme.palette.error.main }} />; 
+        }
+        return <DirectionsBusIcon sx={{ color: theme.palette.primary.main }} />; 
+    };
+
+    return (
+        <Drawer
+            sx={{
+                width: drawerWidth,
+                flexShrink: 0,
+                '& .MuiDrawer-paper': {
+                    width: drawerWidth,
+                    boxSizing: 'border-box',
+                    position: 'fixed', 
+                    top: 0,
+                    left: 0,
+                    // Додаємо zIndex, щоб бути впевненим, що Drawer знаходиться над картою
+                    zIndex: theme.zIndex.drawer + 2 
+                },
+            }}
+            variant="permanent"
+            anchor="left"
+        >
+            <Toolbar>
+                <Typography variant="h6" noWrap sx={{ fontWeight: 'bold' }}>
+                    Маршрути Львова
+                </Typography>
+            </Toolbar>
+            <Divider />
+            <Box sx={{ overflowY: 'auto', height: 'calc(100vh - 64px)' }}>
+                <List dense>
+                    {/* Кнопка Скинути фільтр */}
+                    <ListItem disablePadding>
+                        <ListItemButton onClick={handleRouteClick(null)}>
+                            <ListItemIcon>
+                                {renderIcon(null, true)} 
+                            </ListItemIcon>
+                            <ListItemText 
+                                primary="Показати всі ТЗ" 
+                                secondary={`Всього: ${vehicles.length} ТЗ`}
+                            />
+                        </ListItemButton>
+                    </ListItem>
+                    <Divider />
+
+                    {/* Список маршрутів */}
+                    {uniqueRoutes.map((route) => (
+                        <ListItem key={route.id} disablePadding>
+                            <ListItemButton onClick={handleRouteClick(route.id)}>
+                                <ListItemIcon>
+                                    {renderIcon(route.type)} 
+                                </ListItemIcon>
+                                <ListItemText
+                                    primary={`№ ${route.id} (${route.count} ТЗ)`} 
+                                    secondary={route.description}
+                                    primaryTypographyProps={{ variant: 'subtitle2', fontWeight: 600 }}
+                                    secondaryTypographyProps={{ variant: 'caption', noWrap: true }}
+                                />
+                            </ListItemButton>
+                        </ListItem>
+                    ))}
+                </List>
+            </Box>
+        </Drawer>
+    );
+};
+
+export default SidebarMenu;

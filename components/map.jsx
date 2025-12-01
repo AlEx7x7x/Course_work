@@ -1,128 +1,113 @@
-// components/Map.jsx (ФІКС: Уникнення SSR для Leaflet)
+// components/map.jsx
 
-import React, { useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import { Typography, Box } from '@mui/material';
+import React, { useEffect, useState, useMemo } from 'react';
+import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css'; 
+import L from 'leaflet'; 
 
-// ----------------------------------------------------
-// Налаштування іконок та логіки Leaflet (КЛІЄНТСЬКИЙ КОД)
-// ----------------------------------------------------
-const setupLeaflet = () => {
-    // 🚨 ЦЕЙ КОД ВИКОНУЄТЬСЯ ЛИШЕ У BROWSER (НА КЛІЄНТІ)
-    if (typeof window !== 'undefined') {
-        const L = require('leaflet');
+// 🛑 Визначаємо простий круговий маркер (червона крапка)
+const simpleStopIcon = L.divIcon({
+    className: 'custom-div-icon',
+    html: "<div style='background-color: #d9534f; width: 8px; height: 8px; border-radius: 50%; border: 1px solid #fff; box-shadow: 0 0 2px rgba(0,0,0,0.5);'></div>",
+    iconSize: [8, 8], 
+    iconAnchor: [4, 4] 
+});
 
-        // Виправлення шляху до стандартних іконок Leaflet
-        delete L.Icon.Default.prototype._getIconUrl;
+// ❗️ ВАЖЛИВО: Перевизначаємо стандартний маркер нашої простою іконкою
+L.Marker.prototype.options.icon = simpleStopIcon;
 
-        L.Icon.Default.mergeOptions({
-          iconRetinaUrl: '/leaflet/images/marker-icon-2x.png',
-          iconUrl: '/leaflet/images/marker-icon.png',
-          shadowUrl: '/leaflet/images/marker-shadow.png',
-        });
 
-        // Кастомна іконка для транспорту
-        const BusIcon = (routeId) => {
-            const iconSize = [30, 30]; 
-            const displayId = routeId ? routeId.replace(/[^0-9A-Za-z]/g, '') : '?'; 
+// Компонент для керування картою (переміщення та відображення)
+const MapController = ({ selectedRouteGeometry, allStops }) => {
+    const map = useMap();
+    
+    // 1. АВТОМАТИЧНЕ ЦЕНТРУВАННЯ НА МАРШРУТІ
+    useEffect(() => {
+        if (selectedRouteGeometry && selectedRouteGeometry.length > 0) {
+            // Отримання меж маршруту
+            const bounds = L.latLngBounds(selectedRouteGeometry.map(p => [p.lat, p.lng]));
+            map.fitBounds(bounds, { padding: [50, 50] });
+        } else if (Object.keys(allStops).length > 0) {
+             // Центрування на першій зупинці, якщо маршрут не вибрано
+             const firstStop = Object.values(allStops)[0];
+             map.setView([firstStop.lat, firstStop.lng], 13);
+        } else {
+            // Центрування на Львові, якщо даних немає
+             map.setView([49.8397, 24.0297], 13); 
+        }
+    }, [selectedRouteGeometry, map, allStops]);
 
-            const htmlContent = `
-                <div style="
-                    background-color: #42a5f5; 
-                    color: white; 
-                    border-radius: 50%; 
-                    width: ${iconSize[0]}px; 
-                    height: ${iconSize[1]}px;
-                    text-align: center;
-                    line-height: ${iconSize[1]}px;
-                    font-size: 10px;
-                    font-weight: bold;
-                    border: 2px solid #1e1e1e;
-                    box-shadow: 0 0 5px rgba(0,0,0,0.5);
-                ">
-                    ${displayId}
-                </div>
-            `;
 
-            return L.divIcon({
-                className: 'custom-bus-icon',
-                html: htmlContent,
-                iconSize: iconSize,
-                iconAnchor: [iconSize[0] / 2, iconSize[1] / 2],
-                popupAnchor: [0, -iconSize[1] / 2],
-            });
-        };
-        return BusIcon;
-    }
-    return () => null; // Повертаємо заглушку для SSR
-};
-
-// ----------------------------------------------------
-// Компонент, який оновлює центр карти
-// ----------------------------------------------------
-const MapCenterUpdater = ({ vehicles }) => {
-  const map = useMap();
-  const defaultCenter = [49.8397, 24.0297]; // Львів
-  
-  React.useEffect(() => {
-    if (vehicles && vehicles.length > 0) {
-      const latSum = vehicles.reduce((sum, v) => sum + v.lat, 0);
-      const lngSum = vehicles.reduce((sum, v) => sum + v.lng, 0);
-      const avgLat = latSum / vehicles.length;
-      const avgLng = lngSum / vehicles.length;
-      
-      map.flyTo([avgLat, avgLng], map.getZoom() < 12 ? 13 : map.getZoom()); 
-    } else {
-      map.flyTo(defaultCenter, 13);
-    }
-  }, [vehicles, map]); 
-
-  return (
-    <TileLayer
-      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
-    />
-  );
-};
-
-// ----------------------------------------------------
-// ОСНОВНИЙ КОМПОНЕНТ КАРТИ
-// ----------------------------------------------------
-export default function Map({ vehicles = [] }) {
-  const defaultCenter = [49.8397, 24.0297]; // Львів
-  
-  const BusIcon = setupLeaflet();
-
-  const memoizedMarkers = useMemo(() => {
-    // Рендеринг маркерів
-    return vehicles
-        .filter(v => v.lat && v.lng)
-        .map((vehicle) => (
+    // 2. ВІДОБРАЖЕННЯ ЗУПИНОК ТА ЛІНІЇ
+    
+    // Оптимізований список зупинок для рендерингу
+    const stopMarkers = useMemo(() => 
+        Object.values(allStops).map(stop => (
             <Marker 
-                key={vehicle.id} 
-                position={[vehicle.lat, vehicle.lng]}
-                icon={BusIcon(vehicle.routeId)} // Використовуємо функцію, що перевірена на клієнті
+                key={stop.id} 
+                position={[stop.lat, stop.lng]}
+                // Використовуємо просту іконку, визначену вище
+                icon={simpleStopIcon} 
             >
-                <Popup>
-                    <Box>
-                        <Typography variant="h6">{vehicle.numberPlate || vehicle.routeId}</Typography>
-                        <Typography variant="body2">Маршрут: **{vehicle.routeId || 'Невідомий'}**</Typography>
-                        <Typography variant="body2" color="text.secondary">Швидкість: **{Math.round(vehicle.speed)} км/год**</Typography>
-                    </Box>
-                </Popup>
+                <Popup>{stop.name}</Popup>
             </Marker>
-        ));
-  }, [vehicles, BusIcon]);
+        ))
+    , [allStops]);
+    
+    // Форматування геометрії для Polyline
+    const lineCoordinates = selectedRouteGeometry 
+        ? selectedRouteGeometry.map(p => [p.lat, p.lng]) 
+        : [];
 
-  return (
+    return (
+        <>
+            {/* Відображення маршрутної лінії */}
+            {lineCoordinates.length > 0 && (
+                <Polyline 
+                    positions={lineCoordinates} 
+                    color="#2087e5" 
+                    weight={5} 
+                    opacity={0.8}
+                />
+            )}
+            
+            {/* Відображення зупинок, тільки якщо не вибрано маршрут (для чистоти) 
+               Якщо Вам потрібно відображати зупинки завжди, залиште це.
+               Я залишаю відображення всіх зупинок, щоб Ви бачили, що вони працюють. 
+            */}
+             {stopMarkers}
+
+        </>
+    );
+};
+
+
+// Основний компонент карти
+const Map = ({ selectedRouteGeometry, allStops }) => {
+    
+    // Центрування карти на Львів
+    const defaultCenter = [49.8397, 24.0297];
+
+    return (
         <MapContainer 
             center={defaultCenter} 
             zoom={13} 
-            scrollWheelZoom={true} 
-            style={{ height: '100%', width: '100%' }} 
+            scrollWheelZoom={true}
+            style={{ height: '100%', width: '100%' }}
         >
-            <MapCenterUpdater vehicles={vehicles} />
-            {memoizedMarkers}
+            <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            
+            {/* Підключення керуючого компонента */}
+            <MapController 
+                selectedRouteGeometry={selectedRouteGeometry} 
+                allStops={allStops}
+            />
+            
         </MapContainer>
-  );
-}
+    );
+};
+
+export default Map;
