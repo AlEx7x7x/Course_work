@@ -14,6 +14,7 @@
     "@mui/icons-material": "^7.3.5",
     "@mui/material": "^5.16.4",
     "gtfs-realtime-bindings": "^1.1.1",
+    "gtfs-rt-bindings": "^4.9.0",
     "leaflet": "^1.9.4",
     "next": "14.2.5",
     "react": "18.3.1",

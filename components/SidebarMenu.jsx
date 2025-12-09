@@ -1,4 +1,3 @@
-// components/SidebarMenu.jsx
 
 import React, { useMemo } from 'react';
 import { 
@@ -12,17 +11,16 @@ import {
     Typography,
     Box,
     ListItemIcon,
-    useTheme // Використовуємо тему для кольорів
+    useTheme 
 } from '@mui/material';
 import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import TramIcon from '@mui/icons-material/Tram';
-import ClearAllIcon from '@mui/icons-material/ClearAll'; // Іконка для скидання фільтра
+import ClearAllIcon from '@mui/icons-material/ClearAll';
 
 
 const SidebarMenu = ({ drawerWidth, vehicles, onSelectRoute }) => {
     const theme = useTheme();
 
-    // ⚠️ ГРУПУВАННЯ ТА СОРТУВАННЯ МАРШРУТІВ
     const uniqueRoutes = useMemo(() => {
         const map = {};
         vehicles.forEach(vehicle => {
@@ -37,7 +35,6 @@ const SidebarMenu = ({ drawerWidth, vehicles, onSelectRoute }) => {
             map[vehicle.routeId].count++;
         });
         
-        // Сортування: Трамваї (Т) перед Автобусами (А), потім за номером
         return Object.values(map).sort((a, b) => {
             const isTramA = a.id.startsWith('Т');
             const isTramB = b.id.startsWith('Т');
@@ -45,7 +42,6 @@ const SidebarMenu = ({ drawerWidth, vehicles, onSelectRoute }) => {
             if (isTramA && !isTramB) return -1;
             if (!isTramA && isTramB) return 1;
             
-            // Сортування за номером маршруту
             return a.id.localeCompare(b.id, 'uk', { numeric: true });
         });
     }, [vehicles]);
@@ -58,7 +54,6 @@ const SidebarMenu = ({ drawerWidth, vehicles, onSelectRoute }) => {
         if (isReset) {
             return <ClearAllIcon color="action" />;
         }
-        // Використовуємо кольори з теми MUI
         if (type === 'TRAM') {
             return <TramIcon sx={{ color: theme.palette.error.main }} />; 
         }
@@ -76,7 +71,6 @@ const SidebarMenu = ({ drawerWidth, vehicles, onSelectRoute }) => {
                     position: 'fixed', 
                     top: 0,
                     left: 0,
-                    // Додаємо zIndex, щоб бути впевненим, що Drawer знаходиться над картою
                     zIndex: theme.zIndex.drawer + 2 
                 },
             }}

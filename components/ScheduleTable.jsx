@@ -1,4 +1,3 @@
-// components/ScheduleTable.jsx
 
 import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, 
@@ -7,7 +6,7 @@ import {
 import hooks from '../utils/hooks';
 
 export default function ScheduleTable({ routeId, routeName }) {
-  const { schedules, isLoading } = hooks.useSchedules(routeId); // Використовуємо хук через об'єкт
+  const { schedules, isLoading } = hooks.useSchedules(routeId); 
 
   if (!routeId) {
       return <Typography sx={{ mt: 2 }}>Виберіть маршрут для перегляду графіків.</Typography>;

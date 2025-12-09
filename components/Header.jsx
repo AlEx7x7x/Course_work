@@ -1,17 +1,13 @@
-// components/Header.jsx (ФІНАЛЬНЕ ВИПРАВЛЕННЯ)
 
 import React, { useMemo } from 'react';
 import { AppBar, Toolbar, Typography, Box, useTheme, IconButton } from '@mui/material';
 
-// 🚨 Заглушка, щоб уникнути помилки імпорту на рівні Node.js
 const HeaderIcon = React.memo(() => {
-    // 🚨 Ми використовуємо require, щоб імпортувати іконку лише на клієнті,
-    // запобігаючи помилці ERR_UNSUPPORTED_DIR_IMPORT під час SSR.
     if (typeof window !== 'undefined') {
         const DirectionsBusIcon = require('@mui/icons-material/DirectionsBus').default;
         return <DirectionsBusIcon />;
     }
-    return '🚌'; // Заглушка для SSR
+    return '🚌';
 });
 
 export default function Header() {
