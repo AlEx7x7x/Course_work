@@ -21,6 +21,7 @@ function parseCSV(content) {
 }
 
 function parseRoutes(content) {
+    
     const data = parseCSV(content);
     const vehicles = []; 
     
@@ -365,6 +366,8 @@ export default function HomePage({ initialVehicles, routeGeometries, routeStopId
         <div>
             <Head>
                 <title>Транспортна Мапа Львова</title>
+                <a href="https://example.com">Мій сайт</a>
+
                 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
             </Head>
             <div className="container">
