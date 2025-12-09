@@ -366,10 +366,19 @@ export default function HomePage({ initialVehicles, routeGeometries, routeStopId
         <div>
             <Head>
                 <title>Транспортна Мапа Львова</title>
-                <a href="https://example.com">Мій сайт</a>
 
                 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
             </Head>
+            <div style={{ padding: '10px', backgroundColor: '#f0f0f0' }}>
+            <a 
+            href="https://your-site-link.com" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            style={{ color: 'blue', textDecoration: 'underline' }}
+                >
+                Мій сайт
+                </a>
+            </div>
             <div className="container">
                 <div className="sidebar">
                     <h2>🗺️ SwiftRoute</h2>
