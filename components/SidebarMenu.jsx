@@ -1,3 +1,4 @@
+// файл: components/SidebarMenu.jsx
 
 import React, { useMemo } from 'react';
 import { 
@@ -16,33 +17,36 @@ import {
 import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import TramIcon from '@mui/icons-material/Tram';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
+import DirectionsCarIcon from '@mui/icons-material/DirectionsCar'; 
+import TrainIcon from '@mui/icons-material/Train';
 
-
-const SidebarMenu = ({ drawerWidth, vehicles, onSelectRoute }) => {
+// ВИПРАВЛЕННЯ: vehicles = [] гарантує, що це завжди масив
+const SidebarMenu = ({ drawerWidth, vehicles = [], onSelectRoute, activeRouteId }) => {
     const theme = useTheme();
 
     const uniqueRoutes = useMemo(() => {
         const map = {};
-        vehicles.forEach(vehicle => {
-            if (!map[vehicle.routeId]) {
-                map[vehicle.routeId] = {
-                    id: vehicle.routeId,
-                    description: vehicle.routeDescription || `Маршрут ${vehicle.routeId}`,
+        
+        vehicles.forEach(vehicle => { 
+            // Використовуємо route_short_name (name) для унікальності, щоб не дублювати.
+            if (!map[vehicle.name]) { 
+                map[vehicle.name] = {
+                    id: vehicle.id, // ID для фільтрації
+                    name: vehicle.name, // ShortName для відображення
+                    description: vehicle.longName || `Маршрут ${vehicle.name}`,
                     count: 0,
                     type: vehicle.type,
                 };
             }
-            map[vehicle.routeId].count++;
+            map[vehicle.name].count++;
         });
         
         return Object.values(map).sort((a, b) => {
-            const isTramA = a.id.startsWith('Т');
-            const isTramB = b.id.startsWith('Т');
-
-            if (isTramA && !isTramB) return -1;
-            if (!isTramA && isTramB) return 1;
-            
-            return a.id.localeCompare(b.id, 'uk', { numeric: true });
+            const typeOrder = { 0: 1, 400: 2, 3: 3 }; 
+            const typeA = typeOrder[a.type] || 99;
+            const typeB = typeOrder[b.type] || 99;
+            if (typeA !== typeB) return typeA - typeB;
+            return a.name.localeCompare(b.name, 'uk', { numeric: true });
         });
     }, [vehicles]);
 
@@ -50,50 +54,42 @@ const SidebarMenu = ({ drawerWidth, vehicles, onSelectRoute }) => {
         onSelectRoute(routeId);
     };
 
-    const renderIcon = (type, isReset = false) => {
-        if (isReset) {
-            return <ClearAllIcon color="action" />;
+    const renderIcon = (type, isActive = false) => {
+        const color = isActive ? 'primary' : 'inherit';
+        switch (type) {
+            case 0: return <TramIcon color={color} />;
+            case 400: return <DirectionsBusIcon color={color} />; // Тролейбус
+            case 3: return <DirectionsBusIcon color={color} />; // Автобус
+            default: return <DirectionsCarIcon color={color} />;
         }
-        if (type === 'TRAM') {
-            return <TramIcon sx={{ color: theme.palette.error.main }} />; 
-        }
-        return <DirectionsBusIcon sx={{ color: theme.palette.primary.main }} />; 
     };
 
     return (
         <Drawer
+            variant="permanent"
             sx={{
                 width: drawerWidth,
                 flexShrink: 0,
-                '& .MuiDrawer-paper': {
-                    width: drawerWidth,
+                [`& .MuiDrawer-paper`]: { 
+                    width: drawerWidth, 
                     boxSizing: 'border-box',
-                    position: 'fixed', 
-                    top: 0,
-                    left: 0,
-                    zIndex: theme.zIndex.drawer + 2 
+                    backgroundColor: theme.palette.background.paper, 
+                    borderRight: `1px solid ${theme.palette.divider}` 
                 },
             }}
-            variant="permanent"
-            anchor="left"
         >
-            <Toolbar>
-                <Typography variant="h6" noWrap sx={{ fontWeight: 'bold' }}>
-                    Маршрути Львова
-                </Typography>
-            </Toolbar>
-            <Divider />
-            <Box sx={{ overflowY: 'auto', height: 'calc(100vh - 64px)' }}>
+            <Toolbar /> 
+            <Box sx={{ overflow: 'auto' }}>
                 <List dense>
-                    {/* Кнопка Скинути фільтр */}
-                    <ListItem disablePadding>
-                        <ListItemButton onClick={handleRouteClick(null)}>
+                    {/* Кнопка "Всі маршрути" */}
+                    <ListItem key="all" disablePadding>
+                        <ListItemButton onClick={handleRouteClick(null)} selected={activeRouteId === null}>
                             <ListItemIcon>
-                                {renderIcon(null, true)} 
+                                <ClearAllIcon color={activeRouteId === null ? 'primary' : 'inherit'} />
                             </ListItemIcon>
                             <ListItemText 
-                                primary="Показати всі ТЗ" 
-                                secondary={`Всього: ${vehicles.length} ТЗ`}
+                                primary="Показати всі маршрути" 
+                                secondary={`Всього: ${uniqueRoutes.length}`}
                             />
                         </ListItemButton>
                     </ListItem>
@@ -102,12 +98,15 @@ const SidebarMenu = ({ drawerWidth, vehicles, onSelectRoute }) => {
                     {/* Список маршрутів */}
                     {uniqueRoutes.map((route) => (
                         <ListItem key={route.id} disablePadding>
-                            <ListItemButton onClick={handleRouteClick(route.id)}>
+                            <ListItemButton 
+                                onClick={handleRouteClick(route.id)}
+                                selected={activeRouteId === route.id}
+                            >
                                 <ListItemIcon>
-                                    {renderIcon(route.type)} 
+                                    {renderIcon(route.type, activeRouteId === route.id)} 
                                 </ListItemIcon>
                                 <ListItemText
-                                    primary={`№ ${route.id} (${route.count} ТЗ)`} 
+                                    primary={`№ ${route.name}`} 
                                     secondary={route.description}
                                     primaryTypographyProps={{ variant: 'subtitle2', fontWeight: 600 }}
                                     secondaryTypographyProps={{ variant: 'caption', noWrap: true }}

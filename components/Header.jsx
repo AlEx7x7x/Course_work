@@ -1,9 +1,12 @@
+// файл: components/Header.jsx
 
-import React, { useMemo } from 'react';
+import React from 'react';
 import { AppBar, Toolbar, Typography, Box, useTheme, IconButton } from '@mui/material';
 
+// Імпортуємо іконку динамічно, щоб уникнути помилок SSR
 const HeaderIcon = React.memo(() => {
     if (typeof window !== 'undefined') {
+        // ВИДАЛЕНО: useMemo та логіку vehicles.forEach
         const DirectionsBusIcon = require('@mui/icons-material/DirectionsBus').default;
         return <DirectionsBusIcon />;
     }

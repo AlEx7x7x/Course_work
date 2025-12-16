@@ -1,282 +1,284 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import dynamic from 'next/dynamic';
 import Head from 'next/head';
-import React, { useState, useMemo } from 'react'; 
+import React, { useState, useMemo } from 'react';
+import { query } from '../lib/db'; // <-- ІМПОРТ ФУНКЦІЇ ЗАПИТУ ДО БД
 
-
+// Компонент мапи (змінився імпорт, оскільки тепер це DynamicMap)
 const DynamicMap = dynamic(
-    () => import('../components/map.jsx'), 
+    () => import('../components/map'),
     { ssr: false }
 );
 
+// Допоміжна функція для конвертації часу GTFS (HH:MM:SS) у хвилини
+const toMinutes = t => {
+    if (!t) return -1;
+    const parts = t.split(':').map(Number);
+    // GTFS час може бути > 24:00:00, тому ми просто додаємо години * 60
+    return parts[0] * 60 + parts[1]; 
+};
 
-function parseCSV(content) {
-    const lines = content.trim().split('\n');
-    return lines.slice(1).map(line => {
-        return line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(part => 
-            (part || '').trim().replace(/"/g, '')
-        );
-    });
-}
-
-function parseRoutes(content) {
-    
-    const data = parseCSV(content);
-    const vehicles = []; 
-    
-    data.forEach(parts => {
-        if (parts.length >= 7) { 
-            const routeId = parts[0];
-            const shortName = parts[2];
-            const longName = parts[3]; 
-            let routeType = parseInt(parts[5]); 
-
-            const namePrefix = shortName.toLowerCase().trim();
-
-            if (namePrefix.startsWith('тр') || namePrefix.startsWith('tr')) { 
-                routeType = 400; 
-            } 
-            else if (routeType !== 0) {
-                routeType = 3; 
-            }
-
-            if (routeId && shortName) {
-                vehicles.push({ 
-                    id: routeId, 
-                    name: shortName,
-                    longName: longName, 
-                    type: routeType 
-                }); 
-            }
-        }
-    });
-    return { vehicles }; 
-}
-
-function parseTrips(content) {
-    const data = parseCSV(content);
-    const tripToRouteMap = {};
-    const routeIdToShapeMap = {}; 
-    
-    data.forEach(parts => {
-        if (parts.length >= 7) { 
-            const routeId = parts[0];
-            const serviceId = parts[1];
-            const tripId = parts[2];
-            const shapeId = parts[6];
-            
-            if (routeId && tripId) {
-                tripToRouteMap[tripId] = routeId;
-            }
-            if (routeId && shapeId && !routeIdToShapeMap[routeId]) {
-                routeIdToShapeMap[routeId] = shapeId;
-            }
-        }
-    });
-    return { tripToRouteMap, routeIdToShapeMap };
-}
-
-function parseShapes(content) {
-    const data = parseCSV(content);
-    const allShapes = {}; 
-    
-    data.forEach(parts => {
-        if (parts.length >= 3) {
-            const shapeId = parts[0]; 
-            const lat = parseFloat(parts[1]); 
-            const lng = parseFloat(parts[2]); 
-            
-            if (shapeId && !isNaN(lat) && !isNaN(lng)) {
-                if (!allShapes[shapeId]) {
-                    allShapes[shapeId] = [];
-                }
-                allShapes[shapeId].push({ lat, lng });
-            }
-        }
-    });
-    return allShapes;
-}
-
-function parseStops(content) {
-    const data = parseCSV(content);
-    const stops = {}; 
-    
-    data.forEach(parts => {
-        if (parts.length >= 6) { 
-            const stopId = parts[0];
-            const name = parts[2];   
-            const lat = parseFloat(parts[4]); 
-            const lng = parseFloat(parts[5]); 
-            
-            if (stopId && name && !isNaN(lat) && !isNaN(lng)) {
-                stops[stopId] = { id: stopId, lat, lng, name };
-            }
-        }
-    });
-    return stops; 
-}
-
-function parseStopTimes(content) {
-    const data = parseCSV(content);
-    const tripIdToStopIds = {};
-    
-    data.forEach(parts => {
-        if (parts.length >= 4) {
-            const tripId = parts[0];
-            const arrivalTime = parts[1]; 
-            const stopId = parts[3];
-            
-            if (tripId && stopId) {
-                if (!tripIdToStopIds[tripId]) {
-                    tripIdToStopIds[tripId] = []; 
-                }
-                if (!tripIdToStopIds[tripId].includes(stopId)) {
-                   tripIdToStopIds[tripId].push(stopId);
-                }
-            }
-        }
-    });
-    return tripIdToStopIds;
-}
-
+// ===============================
+// SERVER SIDE PROPS (ЛОГІКА З БД)
+// ===============================
 export async function getServerSideProps() {
-    const dataDir = path.join(process.cwd(), 'data'); 
-    
-    const LIVE_FEED_URL = 'https://opendata.city-adm.lviv.ua/GTFS_RT_data/trip_updates.pb';
-    
-    const liveArrivals = {};
-    let GtfsRt;
     try {
+        // ----------------------------------------------------
+        // 1. Отримання Routes
+        // ----------------------------------------------------
+        const rawVehicles = await query(
+            `SELECT route_id AS id, route_short_name AS name, route_long_name AS longName, route_type AS type FROM routes`
+        );
         
-        const routesContent = fs.readFileSync(path.join(dataDir, 'routes.txt'), 'utf-8');
-        const tripsContent = fs.readFileSync(path.join(dataDir, 'trips.txt'), 'utf-8');
-        const shapesContent = fs.readFileSync(path.join(dataDir, 'shapes.txt'), 'utf-8');
-        const stopsContent = fs.readFileSync(path.join(dataDir, 'stops.txt'), 'utf-8');
-        const stopTimesContent = fs.readFileSync(path.join(dataDir, 'stop_times.txt'), 'utf-8');
-        
-        const { vehicles: rawVehicles } = parseRoutes(routesContent);
-        const { tripToRouteMap, routeIdToShapeMap } = parseTrips(tripsContent);
-        const allShapes = parseShapes(shapesContent);
-        const allStops = parseStops(stopsContent);
-        const tripIdToStopIds = parseStopTimes(stopTimesContent);
+        const vehicles = rawVehicles.map(v => {
+            let routeType = parseInt(v.type || '3', 10);
+            const prefix = (v.name || '').toLowerCase();
+            if (prefix.startsWith('тр') || routeType === 400) routeType = 400; // Тролейбус
+            else if (routeType === 0 || prefix.startsWith('т')) routeType = 0; // Трамвай
+            else routeType = 3; // Автобус
+            
+            return { ...v, type: routeType };
+        });
 
-        const routeGeometries = {};
-        const routeStopIds = {};
-        const plannedArrivals = {}; 
 
+        // ----------------------------------------------------
+        // 2. Отримання Trips (для map та shape)
+        // ----------------------------------------------------
+        const rawTrips = await query(
+            `SELECT trip_id, route_id, shape_id FROM trips WHERE shape_id IS NOT NULL`
+        );
         
-        Object.entries(tripToRouteMap).forEach(([tripId, routeId]) => {
-            const stopIdsForTrip = tripIdToStopIds[tripId];
-            if (stopIdsForTrip) {
-                if (!routeStopIds[routeId]) {
-                    routeStopIds[routeId] = []; 
-                }
-                stopIdsForTrip.forEach(stopId => {
-                    if (!routeStopIds[routeId].includes(stopId)) {
-                        routeStopIds[routeId].push(stopId);
-                    }
-                });
+        const tripToRouteMap = {};
+        const routeIdToShapeMap = {};
+        
+        rawTrips.forEach(trip => {
+            tripToRouteMap[trip.trip_id] = trip.route_id;
+            // Беремо першу знайдену shape_id для route_id
+            if (trip.route_id && trip.shape_id && !routeIdToShapeMap[trip.route_id]) {
+                routeIdToShapeMap[trip.route_id] = trip.shape_id;
             }
         });
 
-        const initialVehicles = rawVehicles
-        .map(vehicle => {
-            const shapeId = routeIdToShapeMap[vehicle.id]; 
-        
-            if (vehicle.id && allShapes[shapeId]) {
-                routeGeometries[vehicle.id] = allShapes[shapeId]; 
-                routeStopIds[vehicle.id] = Array.from(routeStopIds[vehicle.id] || []); 
-                return vehicle;
-            }
-            return null; 
-        })
-            .filter(v => v !== null)
-            .sort((a, b) => { 
-                const typeOrder = { 0: 1, 400: 2, 3: 3 }; 
-                const typeA = typeOrder[a.type] || 99;
-                const typeB = typeOrder[b.type] || 99;
-                if (typeA !== typeB) return typeA - typeB;
-                return a.name.localeCompare(b.name, 'uk', { numeric: true });
-            });
-
-
-    let GtfsRt;
-    try {
-        const { GtfsRt: GtfsRtModule } = require('gtfs-rt-bindings');
-        GtfsRt = GtfsRtModule; 
-    } catch (e) {
-        console.error("Критична помилка імпорту 'gtfs-rt-bindings'. Переконайтеся, що бібліотека встановлена:", e.message);
-    }
-    
-    const LIVE_FEED_URL = 'https://opendata.city-adm.lviv.ua/GTFS_RT_data/trip_updates.pb';
-    
-    const liveArrivals = {};
-
-
-    if (GtfsRt) { 
-        try {
-            const rtResponse = await fetch(LIVE_FEED_URL);
-            
-            if (!rtResponse.ok) {
-                throw new Error(`Помилка HTTP: ${rtResponse.status}`);
+        // ----------------------------------------------------
+        // 3. Отримання Shapes (Геометрія)
+        // ----------------------------------------------------
+        const rawShapes = await query(
+            `SELECT shape_id, shape_pt_lat, shape_pt_lon FROM shapes ORDER BY shape_pt_sequence`
+        );
+        
+        const allShapes = {};
+        rawShapes.forEach(pt => {
+            const lat = parseFloat(pt.shape_pt_lat);
+            const lng = parseFloat(pt.shape_pt_lon);
+            if (!isNaN(lat) && !isNaN(lng)) {
+                if (!allShapes[pt.shape_id]) allShapes[pt.shape_id] = [];
+                allShapes[pt.shape_id].push([lat, lng]);
             }
-            
-            const buffer = await rtResponse.arrayBuffer(); 
-            
-            const feed = GtfsRt.decode(new Uint8Array(buffer)); 
+        });
 
-            feed.entity.forEach(entity => {
-                if (entity.tripUpdate) {
-                    const routeId = entity.tripUpdate.trip.routeId;
-                    
-                    entity.tripUpdate.stopTimeUpdate.forEach(stopUpdate => {
-                        const stopId = stopUpdate.stopId;
-                        const arrivalTimeMs = stopUpdate.arrival?.time?.low * 1000; 
 
-                        if (stopId && arrivalTimeMs) {
-                            if (!liveArrivals[stopId]) {
-                                liveArrivals[stopId] = [];
-                            }
-                            
+        // ----------------------------------------------------
+        // 4. Отримання Stops (Зупинки)
+        // ----------------------------------------------------
+        const rawStops = await query(
+            `SELECT stop_id, stop_name AS name, stop_lat AS lat, stop_lon AS lng FROM stops`
+        );
+        
+        const allStops = {};
+        rawStops.forEach(s => {
+            const lat = parseFloat(s.lat);
+            const lng = parseFloat(s.lng);
+            if (!isNaN(lat) && !isNaN(lng)) {
+                allStops[s.stop_id] = { id: s.stop_id, name: s.name, lat, lng };
+            }
+        });
+
+
+        // ----------------------------------------------------
+        // 5. Отримання Stop Times (Розклад) - ВИПРАВЛЕННЯ SQL IN
+        // ----------------------------------------------------
+        
+        const now = new Date();
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+        const tripIds = Object.keys(tripToRouteMap);
+        let rawStopTimes = [];
+
+        if (tripIds.length > 0) {
+            // Створення рядка заповнювачів: ?, ?, ?...
+            const placeholders = tripIds.map(() => '?').join(', ');
+
+            // Виконання запиту з динамічними заповнювачами
+            rawStopTimes = await query(
+                `SELECT trip_id, arrival_time, stop_id FROM stop_times WHERE arrival_time IS NOT NULL AND trip_id IN (${placeholders})`,
+                tripIds // Масив ID передається як параметри
+            );
+        }
+
+        const routeStopIds = {};
+        const scheduledArrivals = {};
+        
+        rawStopTimes.forEach(parts => {
+            const tripId = parts.trip_id;
+            const arrival = parts.arrival_time;
+            const stopId = parts.stop_id;
+
+            const routeId = tripToRouteMap[tripId];
+            if (!routeId) return;
+
+            if (!routeStopIds[routeId]) routeStopIds[routeId] = new Set();
+            routeStopIds[routeId].add(stopId);
+
+            const arrMin = toMinutes(arrival);
+            const diff = arrMin - nowMinutes;
+            
+            // Фільтрація
+            if (diff < -5 && arrMin < 1440 - 360) return;
+            if (diff > 360) return;
+
+            if (!scheduledArrivals[stopId]) scheduledArrivals[stopId] = [];
+
+            const date = new Date();
+            date.setHours(0, 0, 0, 0);
+            date.setMinutes(arrMin);
+
+            scheduledArrivals[stopId].push({
+                routeId,
+                arrivalTimeMs: date.getTime(),
+                isSchedule: true
+            });
+        });
+
+        // Конвертація Set у масив
+        const flatStops = {};
+        Object.keys(routeStopIds).forEach(r =>
+            flatStops[r] = Array.from(routeStopIds[r])
+        );
+
+        let liveArrivals = { ...scheduledArrivals };
+
+
+        // ----------------------------------------------------
+        // 6. LIVE GTFS (БЕЗ ЗМІН)
+        // ----------------------------------------------------
+        
+        let gtfs;
+        try {
+            const module = await import('gtfs-realtime-bindings');
+            gtfs = module.transit_realtime.FeedMessage;
+        } catch {
+            gtfs = null;
+        }
+
+        if (gtfs) {
+            const url = 'https://opendata.city-adm.lviv.ua/GTFS_RT_data/trip_updates.pb';
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 3000);
+                const res = await fetch(url, { signal: controller.signal });
+                clearTimeout(timeout);
+
+                if (res.ok) {
+                    const buf = await res.arrayBuffer();
+                    const feed = gtfs.decode(new Uint8Array(buf));
+
+                    feed.entity.forEach(ent => {
+                        if (!ent.tripUpdate) return;
+
+                        const routeId = ent.tripUpdate.trip.routeId;
+                        ent.tripUpdate.stopTimeUpdate.forEach(up => {
+                            const stopId = up.stopId;
+                            const t = (up.arrival?.time?.low || up.departure?.time?.low) * 1000;
+
+                            if (!t) return;
+
+                            if (!liveArrivals[stopId]) liveArrivals[stopId] = [];
+
+                            // Видаляємо старий розклад для цього маршруту, якщо є live-оновлення
+                            liveArrivals[stopId] = liveArrivals[stopId]
+                                .filter(x => !(x.routeId === routeId && x.isSchedule));
+
+                            // Додаємо Live
                             liveArrivals[stopId].push({
-                                routeId: routeId,
-                                arrivalTimeMs: arrivalTimeMs 
+                                routeId,
+                                arrivalTimeMs: t,
+                                isSchedule: false
                             });
-                        }
+                        });
+                    });
+
+                    // Сортування Live + Scheduled
+                    Object.keys(liveArrivals).forEach(stopId => {
+                        liveArrivals[stopId].sort((a, b) => a.arrivalTimeMs - b.arrivalTimeMs);
+                        liveArrivals[stopId] = liveArrivals[stopId].slice(0, 10);
                     });
                 }
+            } catch (e) {
+                console.warn("Live data error (Timeout/Fetch failed):", e.message);
+            }
+        }
+        
+        
+        // ----------------------------------------------------
+        // 7. Фінальна обробка (Геометрії + Сортування)
+        // ----------------------------------------------------
+        
+        const routeGeometries = {};
+        const vehiclesWithGeom = vehicles 
+            .map(v => {
+                const shapeId = routeIdToShapeMap[v.id];
+                const g = allShapes[shapeId];
+                if (!g) return null;
+                routeGeometries[v.id] = g;
+                return v;
+            })
+            .filter(Boolean)
+            .sort((a, b) => {
+                // Логіка сортування
+                const typeOrder = { 0: 1, 400: 2, 3: 3 };
+                const typeA = typeOrder[a.type] || 99;
+                const typeB = typeOrder[b.type] || 99;
+                if (typeA !== typeB) return typeA - typeB;
+                // Сортування за назвою (номером)
+                return a.name.localeCompare(b.name, 'uk', { numeric: true });
             });
 
-        } catch (rtError) {
-            console.warn("Не вдалося завантажити/обробити Live-дані (GTFS-RT).", rtError.message); 
-        }
-    } 
-    
-    return {
-        props: {
-            initialVehicles: initialVehicles,
-            routeGeometries: routeGeometries,
-            routeStopIds: routeStopIds,
-            allStops: allStops,
-            plannedArrivals: plannedArrivals, 
-        },
-    };
-    } catch (error) {
-        console.error("Критична помилка сервера під час обробки статичних даних:", error.message);
-        return {
-            props: {
-                initialVehicles: [],
-                routeGeometries: {},
-                routeStopIds: {},
-                allStops: {},
-                liveArrivals: {}, 
-                error: `Не вдалося завантажити дані. Помилка: ${error.message}`
-            },
-        };
-    }
+        const vehiclesMap = vehiclesWithGeom.reduce((acc, v) => {
+            acc[v.id] = v;
+            return acc;
+        }, {});
+        
+
+        return {
+            props: {
+                initialVehicles: vehiclesWithGeom,
+                routeGeometries,
+                routeStopIds: flatStops, 
+                allStops,
+                liveArrivals,
+                vehiclesMap, 
+                error: null
+            }
+        };
+    } catch (e) {
+        console.error("Critical Server Error:", e);
+        return {
+            props: {
+                initialVehicles: [],
+                routeGeometries: {},
+                routeStopIds: {},
+                allStops: {},
+                liveArrivals: {},
+                vehiclesMap: {},
+                error: `Критична помилка сервера: Не вдалося підключитися до БД або виконати запит. (${e.message})`
+            }
+        };
+    }
 }
 
+
+// ===============================
+// UI HELPERS (Без змін)
+// ===============================
 
 const getTypeLabel = (type) => {
     switch (type) {
@@ -287,47 +289,24 @@ const getTypeLabel = (type) => {
     }
 };
 
-const SidebarContent = ({ vehicles, onSelectRoute, activeRouteId }) => {
-    return (
-        <div style={{ padding: '0 10px' }}>
-            {vehicles.map(v => (
-                <div 
-                    key={v.id} 
-                    onClick={() => onSelectRoute(v.id)}
-                    style={{ 
-                        cursor: 'pointer', 
-                        padding: '8px', 
-                        backgroundColor: v.id === activeRouteId ? '#e0f7fa' : 'transparent',
-                        borderBottom: '1px solid #eee',
-                        display: 'flex',
-                        alignItems: 'center'
-                    }}
-                >
-                    <span style={{ 
-                        marginRight: '8px', 
-                        fontSize: '1.2em', 
-                        color: v.type === 0 ? 'red' : v.type === 400 ? 'blue' : 'green' 
-                    }}>
-                        {v.type === 0 ? '🚃' : v.type === 400 ? '🚌' : '🚍'}
-                    </span>
-                    <div>
-                        <strong>№ {v.name}</strong> ({getTypeLabel(v.type)})
-                        <div style={{ fontSize: '0.9em', color: '#555', marginTop: '3px' }}>
-                            {v.longName}
-                        </div>
-                    </div>
-                </div>
-            ))}
-        </div>
-    );
-};
+// ===============================
+// MAIN COMPONENT (Без змін)
+// ===============================
 
+export default function HomePage({
+    initialVehicles,
+    routeGeometries,
+    routeStopIds,
+    allStops,
+    liveArrivals,
+    vehiclesMap, 
+    error
+}) {
 
-export default function HomePage({ initialVehicles, routeGeometries, routeStopIds, allStops, error, liveArrivals }) {
-    
-    const [activeRouteId, setActiveRouteId] = useState(null); 
+    const [activeRouteId, setActiveRouteId] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
-    const [filterType, setFilterType] = useState('all'); 
+    const [filterType, setFilterType] = useState('all');
+    const [simulationEnabled, setSimulationEnabled] = useState(false);
 
     const handleSelectRoute = (routeId) => {
         setActiveRouteId(prev => (prev === routeId ? null : routeId));
@@ -336,28 +315,20 @@ export default function HomePage({ initialVehicles, routeGeometries, routeStopId
     const filteredVehicles = useMemo(() => {
         return initialVehicles.filter(v => {
             const typeMatch = filterType === 'all' || v.type === parseInt(filterType);
-            
             const searchLower = searchTerm.toLowerCase();
             const searchMatch = v.name.toLowerCase().includes(searchLower) ||
-                                v.longName.toLowerCase().includes(searchLower) ||
-                                getTypeLabel(v.type).toLowerCase().includes(searchLower);
-
+                                 (v.longName || '').toLowerCase().includes(searchLower) ||
+                                 getTypeLabel(v.type).toLowerCase().includes(searchLower);
             return typeMatch && searchMatch;
         });
     }, [initialVehicles, searchTerm, filterType]);
 
-    const selectedRouteGeometry = activeRouteId 
-        ? routeGeometries[activeRouteId] 
-        : null;
+    // Підготовка пропсів для мапи
+    const selectedRouteGeometry = activeRouteId ? routeGeometries[activeRouteId] : null;
+    const selectedRouteStops = activeRouteId ? routeStopIds[activeRouteId] : null;
+    const selectedRouteType = activeRouteId ? initialVehicles.find(v => v.id === activeRouteId)?.type : null;
+    const selectedRouteName = activeRouteId ? initialVehicles.find(v => v.id === activeRouteId)?.name : null;
 
-    const selectedRouteStops = activeRouteId
-        ? routeStopIds[activeRouteId]
-        : null;
-
-    const selectedRouteType = activeRouteId
-        ? initialVehicles.find(v => v.id === activeRouteId)?.type
-        : null;
-        
     if (error) {
         return <div style={{padding: '20px', color: 'red'}}>Помилка: {error}</div>;
     }
@@ -365,31 +336,24 @@ export default function HomePage({ initialVehicles, routeGeometries, routeStopId
     return (
         <div>
             <Head>
-                <title>Транспортна Мапа Львова</title>
-
+                <title>SwiftRoute - Львів</title>
                 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
             </Head>
-            <div style={{ padding: '10px', backgroundColor: '#f0f0f0' }}>
-            <a 
-            href="https://your-site-link.com" 
-            target="_blank" 
-            rel="noopener noreferrer"
-            style={{ color: 'blue', textDecoration: 'underline' }}
-                >
-                Мій сайт
-                </a>
-            </div>
+
             <div className="container">
                 <div className="sidebar">
                     <h2>🗺️ SwiftRoute</h2>
                     
                     <div className="controls">
+                        {/* Пошук */}
                         <input
                             type="text"
                             placeholder="Пошук за № або назвою..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
+                        
+                        {/* Фільтр */}
                         <select 
                             value={filterType}
                             onChange={(e) => {
@@ -402,22 +366,60 @@ export default function HomePage({ initialVehicles, routeGeometries, routeStopId
                             <option value="400">Тролейбуси</option>
                             <option value="3">Автобуси</option>
                         </select>
+
+                        {/* Кнопка Симуляції */}
+                        <button 
+                            className={`sim-btn ${simulationEnabled ? 'active' : ''}`}
+                            onClick={() => setSimulationEnabled(p => !p)}
+                        >
+                            {simulationEnabled ? '⏹ Вимкнути Симуляцію' : '▶ Увімкнути Симуляцію'}
+                        </button>
                     </div>
 
-                    <SidebarContent 
-                        vehicles={filteredVehicles}
-                        onSelectRoute={handleSelectRoute}
-                        activeRouteId={activeRouteId}
-                    />
+                    <div style={{ padding: '0 10px' }}>
+                        {filteredVehicles.map(v => (
+                            <div 
+                                key={v.id} 
+                                onClick={() => handleSelectRoute(v.id)}
+                                style={{ 
+                                    cursor: 'pointer', 
+                                    padding: '8px', 
+                                    backgroundColor: v.id === activeRouteId ? '#e0f7fa' : 'transparent',
+                                    borderBottom: '1px solid #eee',
+                                    display: 'flex',
+                                    alignItems: 'center'
+                                }}
+                            >
+                                <span style={{ 
+                                    marginRight: '8px', 
+                                    fontSize: '1.2em', 
+                                    color: v.type === 0 ? 'red' : v.type === 400 ? 'blue' : 'green' 
+                                }}>
+                                    {v.type === 0 ? '🚃' : v.type === 400 ? '🚌' : '🚍'}
+                                </span>
+                                <div>
+                                    <strong>№ {v.name}</strong> ({getTypeLabel(v.type)})
+                                    <div style={{ fontSize: '0.9em', color: '#555', marginTop: '3px' }}>
+                                        {v.longName}
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 </div>
+
                 <div className="map-area">
                     <DynamicMap 
-                        key={activeRouteId} 
+                        key={`${activeRouteId}-${simulationEnabled}`} 
                         selectedRouteGeometry={selectedRouteGeometry} 
                         selectedRouteStops={selectedRouteStops} 
                         allStops={allStops} 
-                        selectedRouteType={selectedRouteType} 
+                        selectedRouteType={selectedRouteType}
+                        selectedRouteName={selectedRouteName}
                         liveArrivals={liveArrivals}
+                        routeGeometries={routeGeometries}
+                        vehiclesMap={vehiclesMap}
+                        simulationEnabled={simulationEnabled}
                     />
                 </div>
             </div>
@@ -435,27 +437,56 @@ export default function HomePage({ initialVehicles, routeGeometries, routeStopId
                     background-color: transparent;
                 }
                 .sidebar {
-                    width: 300px;
+                    width: 320px;
                     overflow-y: auto;
                     border-right: 1px solid #ccc;
                     padding-top: 10px;
                     background-color: #f8f8f8;
+                    display: flex;
+                    flex-direction: column;
+                }
+                .sidebar h2 {
+                    text-align: center;
+                    margin: 0 0 10px 0;
+                    color: #333;
                 }
                 .map-area {
                     flex-grow: 1;
                     min-height: 100%;
+                    position: relative;
                 }
                 .controls {
                     padding: 10px;
-                    border-bottom: 1px solid #ffffffff;
+                    border-bottom: 1px solid #eee;
                     display: flex;
                     flex-direction: column;
-                    gap: 5px;
+                    gap: 8px;
+                    background: #fff;
+                    margin-bottom: 5px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
                 }
                 .controls input, .controls select {
                     padding: 8px;
                     border: 1px solid #ddd;
                     border-radius: 4px;
+                    font-size: 14px;
+                }
+                /* Стилі для кнопки симуляції */
+                .sim-btn {
+                    padding: 10px;
+                    border: none;
+                    border-radius: 4px;
+                    font-weight: bold;
+                    cursor: pointer;
+                    background-color: #4caf50;
+                    color: white;
+                    transition: background 0.3s;
+                }
+                .sim-btn.active {
+                    background-color: #d32f2f;
+                }
+                .sim-btn:hover {
+                    opacity: 0.9;
                 }
             `}</style>
         </div>
