@@ -1,19 +1,16 @@
 import dynamic from 'next/dynamic';
 import Head from 'next/head';
 import React, { useState, useMemo } from 'react';
-import { query } from '../lib/db'; // <-- ІМПОРТ ФУНКЦІЇ ЗАПИТУ ДО БД
+import { query } from '../lib/db'; 
 
-// Компонент мапи (змінився імпорт, оскільки тепер це DynamicMap)
 const DynamicMap = dynamic(
     () => import('../components/map'),
     { ssr: false }
 );
 
-// Допоміжна функція для конвертації часу GTFS (HH:MM:SS) у хвилини
 const toMinutes = t => {
     if (!t) return -1;
     const parts = t.split(':').map(Number);
-    // GTFS час може бути > 24:00:00, тому ми просто додаємо години * 60
     return parts[0] * 60 + parts[1]; 
 };
 
@@ -52,7 +49,6 @@ export async function getServerSideProps() {
         
         rawTrips.forEach(trip => {
             tripToRouteMap[trip.trip_id] = trip.route_id;
-            // Беремо першу знайдену shape_id для route_id
             if (trip.route_id && trip.shape_id && !routeIdToShapeMap[trip.route_id]) {
                 routeIdToShapeMap[trip.route_id] = trip.shape_id;
             }
@@ -104,13 +100,11 @@ export async function getServerSideProps() {
         let rawStopTimes = [];
 
         if (tripIds.length > 0) {
-            // Створення рядка заповнювачів: ?, ?, ?...
             const placeholders = tripIds.map(() => '?').join(', ');
 
-            // Виконання запиту з динамічними заповнювачами
             rawStopTimes = await query(
                 `SELECT trip_id, arrival_time, stop_id FROM stop_times WHERE arrival_time IS NOT NULL AND trip_id IN (${placeholders})`,
-                tripIds // Масив ID передається як параметри
+                tripIds 
             );
         }
 
@@ -148,7 +142,6 @@ export async function getServerSideProps() {
             });
         });
 
-        // Конвертація Set у масив
         const flatStops = {};
         Object.keys(routeStopIds).forEach(r =>
             flatStops[r] = Array.from(routeStopIds[r])
@@ -193,11 +186,9 @@ export async function getServerSideProps() {
 
                             if (!liveArrivals[stopId]) liveArrivals[stopId] = [];
 
-                            // Видаляємо старий розклад для цього маршруту, якщо є live-оновлення
                             liveArrivals[stopId] = liveArrivals[stopId]
                                 .filter(x => !(x.routeId === routeId && x.isSchedule));
 
-                            // Додаємо Live
                             liveArrivals[stopId].push({
                                 routeId,
                                 arrivalTimeMs: t,
@@ -206,7 +197,6 @@ export async function getServerSideProps() {
                         });
                     });
 
-                    // Сортування Live + Scheduled
                     Object.keys(liveArrivals).forEach(stopId => {
                         liveArrivals[stopId].sort((a, b) => a.arrivalTimeMs - b.arrivalTimeMs);
                         liveArrivals[stopId] = liveArrivals[stopId].slice(0, 10);
@@ -233,12 +223,10 @@ export async function getServerSideProps() {
             })
             .filter(Boolean)
             .sort((a, b) => {
-                // Логіка сортування
                 const typeOrder = { 0: 1, 400: 2, 3: 3 };
                 const typeA = typeOrder[a.type] || 99;
                 const typeB = typeOrder[b.type] || 99;
                 if (typeA !== typeB) return typeA - typeB;
-                // Сортування за назвою (номером)
                 return a.name.localeCompare(b.name, 'uk', { numeric: true });
             });
 
@@ -334,7 +322,8 @@ export default function HomePage({
     }
 
     return (
-        <div>
+        // Видалено зайві текстові вузли, якщо вони тут були
+        <div className="root-wrapper">
             <Head>
                 <title>SwiftRoute - Львів</title>
                 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -376,7 +365,7 @@ export default function HomePage({
                         </button>
                     </div>
 
-                    <div style={{ padding: '0 10px' }}>
+                    <div className="list-content">
                         {filteredVehicles.map(v => (
                             <div 
                                 key={v.id} 
@@ -410,7 +399,7 @@ export default function HomePage({
 
                 <div className="map-area">
                     <DynamicMap 
-                        key={`${activeRouteId}-${simulationEnabled}`} 
+                        key="main-map"
                         selectedRouteGeometry={selectedRouteGeometry} 
                         selectedRouteStops={selectedRouteStops} 
                         allStops={allStops} 
@@ -430,30 +419,35 @@ export default function HomePage({
                     margin: 0;
                     padding: 0;
                     font-family: Arial, sans-serif;
+                    overflow: hidden; /* <--- ЦЕ БЛОКУЄ ПРОКРУТКУ ВСІЄЇ СТОРІНКИ */
+                }
+                .root-wrapper {
+                    height: 100vh;
+                    width: 100vw;
+                    overflow: hidden;
                 }
                 .container {
                     display: flex;
-                    height: 100vh;
+                    height: 100%;
+                    width: 100%;
                     background-color: transparent;
                 }
                 .sidebar {
                     width: 320px;
-                    overflow-y: auto;
+                    height: 100%;
                     border-right: 1px solid #ccc;
                     padding-top: 10px;
                     background-color: #f8f8f8;
                     display: flex;
                     flex-direction: column;
+                    flex-shrink: 0; /* Забороняємо стискання сайдбару */
+                    z-index: 1000;
                 }
                 .sidebar h2 {
                     text-align: center;
                     margin: 0 0 10px 0;
                     color: #333;
-                }
-                .map-area {
-                    flex-grow: 1;
-                    min-height: 100%;
-                    position: relative;
+                    flex-shrink: 0;
                 }
                 .controls {
                     padding: 10px;
@@ -464,6 +458,17 @@ export default function HomePage({
                     background: #fff;
                     margin-bottom: 5px;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                    flex-shrink: 0; /* Панель управління не стискається */
+                }
+                .list-content {
+                    flex-grow: 1; /* Займає весь доступний простір */
+                    overflow-y: auto; /* <--- СКРОЛ ТІЛЬКИ ТУТ (СПИСОК) */
+                    padding: 0 10px;
+                }
+                .map-area {
+                    flex-grow: 1;
+                    height: 100%;
+                    position: relative;
                 }
                 .controls input, .controls select {
                     padding: 8px;
@@ -471,7 +476,6 @@ export default function HomePage({
                     border-radius: 4px;
                     font-size: 14px;
                 }
-                /* Стилі для кнопки симуляції */
                 .sim-btn {
                     padding: 10px;
                     border: none;
